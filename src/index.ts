@@ -20,120 +20,112 @@ const SCHEMA_RESOURCE_URI = "plantops:/schema";
 const SCHEMA_RESOURCE_NAME = "Plantops GraphQL Schema (via Introspection)";
 const SCHEMA_MIME_TYPE = "application/json";
 
-// This schema defines the configuration Smithery will ask the user for.
-export const configSchema = z.object({
-  endpointUrl: z.string().url().describe("The full URL of your Plantops GraphQL endpoint."),
-  adminSecret: z.string().optional().describe("The admin secret for accessing the endpoint."),
-});
+// --- MODIFICATION: We are removing the configSchema completely ---
 
 // The main server logic is now wrapped in this exported function.
-export default function createServer({ config: _config }: { config: z.infer<typeof configSchema> }) {
-    // --- START OF MODIFICATION ---
-    // We will IGNORE the configuration from Smithery and use hardcoded values.
+// --- MODIFICATION: The function no longer accepts any arguments ---
+export default function createServer() {
+    // --- Hardcoded values for testing ---
     // Replace these with your actual endpoint URL and secret.
-
     const endpointUrl = "https://your-actual-graphql-url.com/v1/graphql";
     const adminSecret = "your-admin-secret-if-you-have-one"; // Delete this line if you don't use a secret.
+    // ---
 
-    // --- END OF MODIFICATION ---
+    const PLANTOPS_ENDPOINT = endpointUrl;
 
-    const { endpointUrl: validatedEndpointUrl, adminSecret: validatedAdminSecret } = { endpointUrl, adminSecret };
-    const PLANTOPS_ENDPOINT = validatedEndpointUrl;
+    console.error(`[INFO] Initializing server for Plantops Endpoint: ${PLANTOPS_ENDPOINT}`);
 
-
-  console.error(`[INFO] Initializing server for Plantops Endpoint: ${PLANTOPS_ENDPOINT}`);
-
-  const server = new McpServer({
-    name: SERVER_NAME,
-    version: SERVER_VERSION,
-    capabilities: {
-      resources: {},
-      tools: {},
-    },
-  });
-
-  const headers: Record<string, string> = {};
-  if (validatedAdminSecret) {
-    headers['x-plantops-admin-secret'] = validatedAdminSecret; // Ensure your server accepts this header
-  }
-  const gqlClient = new GraphQLClient(PLANTOPS_ENDPOINT, { headers });
-
-  async function makeGqlRequest<
-      T = any,
-      V extends Record<string, any> = Record<string, any>
-  >(
-    query: string,
-    variables?: V,
-    requestHeaders?: Record<string, string>
-  ): Promise<T> {
-    try {
-      const combinedHeaders = { ...headers, ...requestHeaders };
-      return await gqlClient.request<T>(query, variables, combinedHeaders);
-    } catch (error) {
-      if (error instanceof ClientError) {
-        const gqlErrors = error.response?.errors?.map(e => e.message).join(', ') || 'Unknown GraphQL error';
-        console.error(`[ERROR] GraphQL Request Failed: ${gqlErrors}`, error.response);
-        throw new Error(`GraphQL operation failed: ${gqlErrors}`);
-      }
-      console.error("[ERROR] Unexpected error during GraphQL request:", error);
-      throw error;
-    }
-  }
-
-  let introspectionSchema: IntrospectionSchema | null = null;
-
-  async function getIntrospectionSchema(): Promise<IntrospectionSchema> {
-      if (introspectionSchema) {
-          return introspectionSchema;
-      }
-      console.error("[INFO] Fetching GraphQL schema via introspection...");
-      const introspectionQuery = getIntrospectionQuery();
-      try {
-          const result = await makeGqlRequest<IntrospectionQuery>(introspectionQuery);
-          if (!result.__schema) {
-          throw new Error("Introspection query did not return a __schema object.");
-          }
-          introspectionSchema = result.__schema;
-          console.error("[INFO] Introspection successful, schema cached.");
-          return introspectionSchema;
-      } catch (error) {
-          console.error("[ERROR] Failed to fetch or cache introspection schema:", error);
-          introspectionSchema = null;
-          throw new Error(`Failed to get GraphQL schema: ${error instanceof Error ? error.message : String(error)}`);
-      }
-  }
-
-  server.resource(
-    SCHEMA_RESOURCE_NAME,
-    SCHEMA_RESOURCE_URI,
-    { mimeType: SCHEMA_MIME_TYPE },
-    async () => {
-      console.error(`[INFO] Handling read request for resource: ${SCHEMA_RESOURCE_URI}`);
-      const schema = await getIntrospectionSchema();
-      return {
-          contents: [{
-              uri: SCHEMA_RESOURCE_URI,
-              text: JSON.stringify(schema, null, 2),
-              mimeType: SCHEMA_MIME_TYPE
-          }]
-      };
-    }
-  );
-
-  server.tool(
-    "listFields",
-    "List all top-level GraphQL query fields with descriptions.",
-    {},
-    async () => {
-        console.error(`[INFO] Executing tool 'listFields'`);
-        const schema = await getIntrospectionSchema();
-        if (schema.queryType) {
-            const queryRoot = schema.types.find(t => t.name === schema.queryType?.name) as IntrospectionObjectType | undefined;
-            const fields = queryRoot?.fields?.map(f => ({ name: f.name, description: f.description || "No description." })) || [];
-            return { content: [{ type: "text", text: JSON.stringify({ fields }, null, 2) }] };
-        }
-        return { content: [{ type: "text", text: JSON.stringify({ fields: [] }, null, 2) }] };
+    const server = new McpServer({
+        name: SERVER_NAME,
+        version: SERVER_VERSION,
+        capabilities: {
+            resources: {},
+            tools: {},
+        },
     });
+
+    const headers: Record<string, string> = {};
+    if (adminSecret) {
+        headers['x-plantops-admin-secret'] = adminSecret; // Ensure your server accepts this header
+    }
+    const gqlClient = new GraphQLClient(PLANTOPS_ENDPOINT, { headers });
+
+    async function makeGqlRequest<
+        T = any,
+        V extends Record<string, any> = Record<string, any>
+    >(
+        query: string,
+        variables?: V,
+        requestHeaders?: Record<string, string>
+    ): Promise<T> {
+        try {
+            const combinedHeaders = { ...headers, ...requestHeaders };
+            return await gqlClient.request<T>(query, variables, combinedHeaders);
+        } catch (error) {
+            if (error instanceof ClientError) {
+                const gqlErrors = error.response?.errors?.map(e => e.message).join(', ') || 'Unknown GraphQL error';
+                console.error(`[ERROR] GraphQL Request Failed: ${gqlErrors}`, error.response);
+                throw new Error(`GraphQL operation failed: ${gqlErrors}`);
+            }
+            console.error("[ERROR] Unexpected error during GraphQL request:", error);
+            throw error;
+        }
+    }
+
+    let introspectionSchema: IntrospectionSchema | null = null;
+
+    async function getIntrospectionSchema(): Promise<IntrospectionSchema> {
+        if (introspectionSchema) {
+            return introspectionSchema;
+        }
+        console.error("[INFO] Fetching GraphQL schema via introspection...");
+        const introspectionQuery = getIntrospectionQuery();
+        try {
+            const result = await makeGqlRequest<IntrospectionQuery>(introspectionQuery);
+            if (!result.__schema) {
+                throw new Error("Introspection query did not return a __schema object.");
+            }
+            introspectionSchema = result.__schema;
+            console.error("[INFO] Introspection successful, schema cached.");
+            return introspectionSchema;
+        } catch (error) {
+            console.error("[ERROR] Failed to fetch or cache introspection schema:", error);
+            introspectionSchema = null;
+            throw new Error(`Failed to get GraphQL schema: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    server.resource(
+        SCHEMA_RESOURCE_NAME,
+        SCHEMA_RESOURCE_URI,
+        { mimeType: SCHEMA_MIME_TYPE },
+        async () => {
+            console.error(`[INFO] Handling read request for resource: ${SCHEMA_RESOURCE_URI}`);
+            const schema = await getIntrospectionSchema();
+            return {
+                contents: [{
+                    uri: SCHEMA_RESOURCE_URI,
+                    text: JSON.stringify(schema, null, 2),
+                    mimeType: SCHEMA_MIME_TYPE
+                }]
+            };
+        }
+    );
+
+    server.tool(
+        "listFields",
+        "List all top-level GraphQL query fields with descriptions.",
+        {},
+        async () => {
+            console.error(`[INFO] Executing tool 'listFields'`);
+            const schema = await getIntrospectionSchema();
+            if (schema.queryType) {
+                const queryRoot = schema.types.find(t => t.name === schema.queryType?.name) as IntrospectionObjectType | undefined;
+                const fields = queryRoot?.fields?.map(f => ({ name: f.name, description: f.description || "No description." })) || [];
+                return { content: [{ type: "text", text: JSON.stringify({ fields }, null, 2) }] };
+            }
+            return { content: [{ type: "text", text: JSON.stringify({ fields: [] }, null, 2) }] };
+        });
 
     server.tool(
         "listMutations",
@@ -151,36 +143,36 @@ export default function createServer({ config: _config }: { config: z.infer<type
         });
 
 
-  server.tool(
-    "describeField",
-    "Return the argument schema and return type for a top-level field. IMPORTANT: This does not show sub-fields of complex types. To discover the fields of a complex return type (e.g., 'Users'), use the 'introspectType' tool.",
-    {
-        fieldName: z.string().describe("Name of the top-level field to describe."),
-    },
-    async ({ fieldName }) => {
-        console.error(`[INFO] Executing tool 'describeField' for field: ${fieldName}`);
-        const schema = await getIntrospectionSchema();
-        const queryRoot = schema.types.find(t => t.name === schema.queryType?.name) as IntrospectionObjectType | undefined;
-        const field = queryRoot?.fields.find(f => f.name === fieldName);
+    server.tool(
+        "describeField",
+        "Return the argument schema and return type for a top-level field. IMPORTANT: This does not show sub-fields of complex types. To discover the fields of a complex return type (e.g., 'Users'), use the 'introspectType' tool.",
+        {
+            fieldName: z.string().describe("Name of the top-level field to describe."),
+        },
+        async ({ fieldName }) => {
+            console.error(`[INFO] Executing tool 'describeField' for field: ${fieldName}`);
+            const schema = await getIntrospectionSchema();
+            const queryRoot = schema.types.find(t => t.name === schema.queryType?.name) as IntrospectionObjectType | undefined;
+            const field = queryRoot?.fields.find(f => f.name === fieldName);
 
-        if (!field) {
-            throw new Error(`Field '${fieldName}' not found.`);
-        }
+            if (!field) {
+                throw new Error(`Field '${fieldName}' not found.`);
+            }
 
-        const argsSchema = field.args.map(arg => ({
-            name: arg.name,
-            description: arg.description,
-            type: JSON.stringify(arg.type),
-        }));
+            const argsSchema = field.args.map(arg => ({
+                name: arg.name,
+                description: arg.description,
+                type: JSON.stringify(arg.type),
+            }));
 
-        const payload = {
-            field: fieldName,
-            description: field.description || null,
-            returnType: JSON.stringify(field.type),
-            argsSchema,
-        };
-        return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
-    });
+            const payload = {
+                field: fieldName,
+                description: field.description || null,
+                returnType: JSON.stringify(field.type),
+                argsSchema,
+            };
+            return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+        });
 
     server.tool(
         "describeComplexField",
@@ -281,5 +273,5 @@ export default function createServer({ config: _config }: { config: z.infer<type
     );
 
 
-  return server;
+    return server;
 }
