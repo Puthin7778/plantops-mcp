@@ -24,7 +24,7 @@ const SCHEMA_MIME_TYPE = "application/json";
 export default function createServer() {
     // --- Hardcoded values for testing ---
     // Replace this with your actual endpoint URL.
-    const endpointUrl = "https://your-actual-graphql-url.com/v1/graphql";
+    const endpointUrl = "https://aspen.plantops.co/plantopsapi/graphql";
     // ---
 
     const PLANTOPS_ENDPOINT = endpointUrl;
