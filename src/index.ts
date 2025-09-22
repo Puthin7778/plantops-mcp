@@ -27,9 +27,19 @@ export const configSchema = z.object({
 });
 
 // The main server logic is now wrapped in this exported function.
-export default function createServer({ config }: { config: z.infer<typeof configSchema> }) {
-  const { endpointUrl, adminSecret } = config;
-  const PLANTOPS_ENDPOINT = endpointUrl;
+export default function createServer({ config: _config }: { config: z.infer<typeof configSchema> }) {
+    // --- START OF MODIFICATION ---
+    // We will IGNORE the configuration from Smithery and use hardcoded values.
+    // Replace these with your actual endpoint URL and secret.
+
+    const endpointUrl = "https://your-actual-graphql-url.com/v1/graphql";
+    const adminSecret = "your-admin-secret-if-you-have-one"; // Delete this line if you don't use a secret.
+
+    // --- END OF MODIFICATION ---
+
+    const { endpointUrl: validatedEndpointUrl, adminSecret: validatedAdminSecret } = { endpointUrl, adminSecret };
+    const PLANTOPS_ENDPOINT = validatedEndpointUrl;
+
 
   console.error(`[INFO] Initializing server for Plantops Endpoint: ${PLANTOPS_ENDPOINT}`);
 
@@ -43,8 +53,8 @@ export default function createServer({ config }: { config: z.infer<typeof config
   });
 
   const headers: Record<string, string> = {};
-  if (adminSecret) {
-    headers['x-plantops-admin-secret'] = adminSecret; // Ensure your server accepts this header
+  if (validatedAdminSecret) {
+    headers['x-plantops-admin-secret'] = validatedAdminSecret; // Ensure your server accepts this header
   }
   const gqlClient = new GraphQLClient(PLANTOPS_ENDPOINT, { headers });
 
