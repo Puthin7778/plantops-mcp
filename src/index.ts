@@ -110,286 +110,165 @@ export default function createServer({ config }: { config: z.infer<typeof config
     }
   );
 
-  // All server.tool(...) definitions remain exactly the same as before...
-  // ... (run_graphql_query, list_tables, etc.)
   server.tool(
-  "run_graphql_query",
-  "Executes a read-only GraphQL query against the Plantops endpoint...",
-  {
-    query: z.string().describe("The GraphQL query string (must be a read-only operation)."),
-    variables: z.record(z.unknown()).optional().describe("Optional. An object containing variables..."),
-  },
-  async ({ query, variables }) => {
-    console.error(`[INFO] Executing tool 'run_graphql_query'`);
-    if (query.trim().toLowerCase().startsWith('mutation')) {
-        throw new Error("This tool only supports read-only queries...");
-    }
-    const result = await makeGqlRequest(query, variables);
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-  });
+    "listFields",
+    "List all top-level GraphQL query fields with descriptions.",
+    {},
+    async () => {
+        console.error(`[INFO] Executing tool 'listFields'`);
+        const schema = await getIntrospectionSchema();
+        if (schema.queryType) {
+            const queryRoot = schema.types.find(t => t.name === schema.queryType?.name) as IntrospectionObjectType | undefined;
+            const fields = queryRoot?.fields?.map(f => ({ name: f.name, description: f.description || "No description." })) || [];
+            return { content: [{ type: "text", text: JSON.stringify({ fields }, null, 2) }] };
+        }
+        return { content: [{ type: "text", text: JSON.stringify({ fields: [] }, null, 2) }] };
+    });
+
+    server.tool(
+        "listMutations",
+        "List all top-level GraphQL mutation fields with descriptions.",
+        {},
+        async () => {
+            console.error(`[INFO] Executing tool 'listMutations'`);
+            const schema = await getIntrospectionSchema();
+            if (schema.mutationType) {
+                const mutationRoot = schema.types.find(t => t.name === schema.mutationType?.name) as IntrospectionObjectType | undefined;
+                const mutations = mutationRoot?.fields?.map(f => ({ name: f.name, description: f.description || "No description." })) || [];
+                return { content: [{ type: "text", text: JSON.stringify({ mutations }, null, 2) }] };
+            }
+            return { content: [{ type: "text", text: JSON.stringify({ mutations: [], info: "No mutations defined in the schema." }, null, 2) }] };
+        });
+
 
   server.tool(
-  "run_graphql_mutation",
-  "Executes a GraphQL mutation to insert, update, or delete data...",
-  {
-    mutation: z.string().describe("The GraphQL mutation string."),
-    variables: z.record(z.unknown()).optional().describe("Optional. An object containing variables..."),
-  },
-  async ({ mutation, variables }) => {
-    console.error(`[INFO] Executing tool 'run_graphql_mutation'`);
-    if (!mutation.trim().toLowerCase().startsWith('mutation')) {
-        throw new Error("The provided string does not appear to be a mutation...");
-    }
-    const result = await makeGqlRequest(mutation, variables);
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-  });
-
-  server.tool(
-  "list_tables",
-  "Lists available data tables (or collections) managed by Plantops, organized by schema with descriptions",
-  {
-    schemaName: z.string().optional().describe("Optional. The database schema name to filter results. If omitted, returns tables from all schemas.")
-  },
-  async ({ schemaName }) => {
-      console.error(`[INFO] Executing tool 'list_tables' for schema: ${schemaName || 'ALL'}`);
-      const schema = await getIntrospectionSchema();
-      const query = gql`
-          query GetTablesWithDescriptions { __type(name: "query_root") { fields { name description type { name kind } } } }
-      `;
-      const result = await makeGqlRequest(query);
-      const tablesData: Record<string, Array<{name: string, description: string | null}>> = {};
-      if (result.__type && result.__type.fields) {
-          for (const field of result.__type.fields) {
-              if (field.name.includes('_aggregate') || field.name.includes('_by_pk') || field.name.includes('_stream') || field.name.includes('_mutation') || field.name.startsWith('__')) {
-                  continue;
-              }
-              let currentSchema = 'public';
-              if (field.description && field.description.includes('schema:')) {
-                  const schemaMatch = field.description.match(/schema:\s*([^\s,]+)/i);
-                  if (schemaMatch && schemaMatch[1]) {
-                      currentSchema = schemaMatch[1];
-                  }
-              }
-              if (schemaName && currentSchema !== schemaName) {
-                  continue;
-              }
-              if (!tablesData[currentSchema]) {
-                  tablesData[currentSchema] = [];
-              }
-              tablesData[currentSchema].push({ name: field.name, description: field.description });
-          }
-      }
-      const formattedOutput = Object.entries(tablesData).map(([schema, tables]) => ({ schema, tables: tables.sort((a, b) => a.name.localeCompare(b.name)) })).sort((a, b) => a.schema.localeCompare(b.schema));
-      return { content: [{ type: "text", text: JSON.stringify(formattedOutput, null, 2) }] };
-  });
-
-  server.tool(
-  "list_root_fields",
-  "Lists the available top-level query, mutation, or subscription fields...",
-  {
-    fieldType: z.enum(["QUERY", "MUTATION", "SUBSCRIPTION"]).optional().describe("Optional. Filter by 'QUERY'...")
-  },
-  async ({ fieldType }) => {
-    console.error(`[INFO] Executing tool 'list_root_fields', filtering by: ${fieldType || 'ALL'}`);
-    const schema = await getIntrospectionSchema();
-    let fields: IntrospectionField[] = [];
-    if ((!fieldType || fieldType === "QUERY") && schema.queryType) {
+    "describeField",
+    "Return the argument schema and return type for a top-level field. IMPORTANT: This does not show sub-fields of complex types. To discover the fields of a complex return type (e.g., 'Users'), use the 'introspectType' tool.",
+    {
+        fieldName: z.string().describe("Name of the top-level field to describe."),
+    },
+    async ({ fieldName }) => {
+        console.error(`[INFO] Executing tool 'describeField' for field: ${fieldName}`);
+        const schema = await getIntrospectionSchema();
         const queryRoot = schema.types.find(t => t.name === schema.queryType?.name) as IntrospectionObjectType | undefined;
-        fields = fields.concat(queryRoot?.fields || []);
-    }
-    if ((!fieldType || fieldType === "MUTATION") && schema.mutationType) {
-        const mutationRoot = schema.types.find(t => t.name === schema.mutationType?.name) as IntrospectionObjectType | undefined;
-        fields = fields.concat(mutationRoot?.fields || []);
-    }
-    if ((!fieldType || fieldType === "SUBSCRIPTION") && schema.subscriptionType) {
-        const subscriptionRoot = schema.types.find(t => t.name === schema.subscriptionType?.name) as IntrospectionObjectType | undefined;
-        fields = fields.concat(subscriptionRoot?.fields || []);
-    }
-    const fieldInfo = fields.map(f => ({ name: f.name, description: f.description || "No description.", })).sort((a, b) => a.name.localeCompare(b.name));
-    return { content: [{ type: "text", text: JSON.stringify(fieldInfo, null, 2) }] };
-  });
+        const field = queryRoot?.fields.find(f => f.name === fieldName);
 
-  server.tool(
-  "describe_graphql_type",
-  "Provides details about a specific GraphQL type (Object, Input, Scalar, Enum, Interface, Union)...",
-  {
-    typeName: z.string().describe("The exact, case-sensitive name of the GraphQL type..."),
-  },
-  async ({ typeName }) => {
-    console.error(`[INFO] Executing tool 'describe_graphql_type' for type: ${typeName}`);
-    const schema = await getIntrospectionSchema();
-    const typeInfo = schema.types.find(t => t.name === typeName);
-    if (!typeInfo) {
-        throw new Error(`Type '${typeName}' not found in the schema.`);
-    }
-    const formattedInfo = {
-        kind: typeInfo.kind,
-        name: typeInfo.name,
-        description: typeInfo.description || null,
-        ...(typeInfo.kind === 'OBJECT' || typeInfo.kind === 'INTERFACE' ? { fields: (typeInfo as IntrospectionObjectType | IntrospectionInterfaceType).fields?.map((f: IntrospectionField) => ({ name: f.name, description: f.description || null, type: JSON.stringify(f.type), args: f.args?.map((a: IntrospectionInputValue) => ({ name: a.name, type: JSON.stringify(a.type) })) || [] })) || [] } : {}),
-        ...(typeInfo.kind === 'INPUT_OBJECT' ? { inputFields: (typeInfo as IntrospectionInputObjectType).inputFields?.map((f: IntrospectionInputValue) => ({ name: f.name, description: f.description || null, type: JSON.stringify(f.type), })) || [] } : {}),
-        ...(typeInfo.kind === 'ENUM' ? { enumValues: (typeInfo as IntrospectionEnumType).enumValues?.map(ev => ({ name: ev.name, description: ev.description || null })) || [] } : {}),
-        ...(typeInfo.kind === 'UNION' || typeInfo.kind === 'INTERFACE' ? { possibleTypes: (typeInfo as IntrospectionUnionType | IntrospectionInterfaceType).possibleTypes?.map(pt => pt.name) || [] } : {}),
-    };
-    return { content: [{ type: "text", text: JSON.stringify(formattedInfo, null, 2) }] };
-  });
-
-  server.tool(
-  "preview_table_data",
-  "Fetch esa limited sample of rows (default 5) from a specified table...",
-  {
-    tableName: z.string().describe("The exact name of the table..."),
-    limit: z.number().int().positive().optional().default(5).describe("Optional. Maximum number of rows..."),
-  },
-  async ({ tableName, limit }) => {
-    console.error(`[INFO] Executing tool 'preview_table_data' for table: ${tableName}, limit: ${limit}`);
-    const schema = await getIntrospectionSchema();
-    const tableType = schema.types.find(t => t.name === tableName && t.kind === 'OBJECT') as IntrospectionObjectType | undefined;
-    if (!tableType) {
-        throw new Error(`Table (Object type) '${tableName}' not found in schema.`);
-    }
-    const scalarFields = tableType.fields?.filter(f => { let currentType = f.type; while (currentType.kind === 'NON_NULL' || currentType.kind === 'LIST') currentType = currentType.ofType; return currentType.kind === 'SCALAR' || currentType.kind === 'ENUM'; }).map(f => f.name) || [];
-    if (scalarFields.length === 0) {
-        console.error(`[WARN] No scalar fields found for table ${tableName}...`);
-        scalarFields.push('__typename');
-    }
-    const fieldsString = scalarFields.join('\n          ');
-    const query = gql` query PreviewData($limit: Int!) { ${tableName}(limit: $limit) { ${fieldsString} } }`;
-    const variables = { limit };
-    const result = await makeGqlRequest(query, variables);
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-  });
-
-  server.tool(
-  "aggregate_data",
-  "Performs a simple aggregation (count, sum, avg, min, max)...",
-  {
-    tableName: z.string().describe("The exact name of the table..."),
-    aggregateFunction: z.enum(["count", "sum", "avg", "min", "max"]).describe("The aggregation function..."),
-    field: z.string().optional().describe("Required for 'sum', 'avg', 'min', 'max'..."),
-    filter: z.record(z.unknown()).optional().describe("Optional. A Plantops GraphQL 'where' filter object..."),
-  },
-  async ({ tableName, aggregateFunction, field, filter }) => {
-    console.error(`[INFO] Executing tool 'aggregate_data': ${aggregateFunction} on ${tableName}...`);
-    if (aggregateFunction !== 'count' && !field) {
-        throw new Error(`The 'field' parameter is required for '${aggregateFunction}' aggregation.`);
-    }
-    if (aggregateFunction === 'count' && field) {
-        console.error(`[WARN] 'field' parameter is ignored for 'count' aggregation.`);
-    }
-    const aggregateTableName = `${tableName}_aggregate`;
-    let aggregateSelection = '';
-    if (aggregateFunction === 'count') {
-        aggregateSelection = `{ count }`;
-    } else if (field) {
-        aggregateSelection = `{ ${aggregateFunction} { ${field} } }`;
-    } else {
-        throw new Error(`'field' parameter is missing for '${aggregateFunction}' aggregation.`);
-    }
-    const boolExpTypeName = `${tableName}_bool_exp`;
-    const filterVariableDefinition = filter ? `($filter: ${boolExpTypeName}!)` : "";
-    const whereClause = filter ? `where: $filter` : "";
-    const query = gql` 
-      query AggregateData ${filterVariableDefinition} {
-        ${aggregateTableName}(${whereClause}) {
-          aggregate ${aggregateSelection}
+        if (!field) {
+            throw new Error(`Field '${fieldName}' not found.`);
         }
-      }
-    `;
-    const variables = filter ? { filter } : {};
-    const rawResult = await makeGqlRequest(query, variables);
-    let finalResult = null;
-    if (rawResult && rawResult[aggregateTableName] && rawResult[aggregateTableName].aggregate) {
-        finalResult = rawResult[aggregateTableName].aggregate;
-    } else {
-        console.error('[WARN] Unexpected result structure from aggregation query:', rawResult);
-        finalResult = rawResult;
-    }
-    return { content: [{ type: "text", text: JSON.stringify(finalResult, null, 2) }] };
-  });
 
-  server.tool(
-  "health_check",
-  "Checks if the configured Plantops GraphQL endpoint is reachable...",
-  {
-    healthEndpointUrl: z.string().url().optional().describe("Optional. A specific HTTP health check URL...")
-  },
-  async ({ healthEndpointUrl }) => {
-    console.error(`[INFO] Executing tool 'health_check'...`);
-    try {
-        let resultText = "";
-        if (healthEndpointUrl) {
-            console.error(`[DEBUG] Performing HTTP GET to: ${healthEndpointUrl}`);
-            const response = await fetch(healthEndpointUrl, { method: 'GET' });
-            resultText = `Health endpoint ${healthEndpointUrl} status: ${response.status} ${response.statusText}`;
-             if (!response.ok) throw new Error(resultText);
-        } else {
-            console.error(`[DEBUG] Performing GraphQL query { __typename } to: ${PLANTOPS_ENDPOINT}`);
-            const query = gql`query HealthCheck { __typename }`;
-            const result = await makeGqlRequest(query);
-            resultText = `GraphQL endpoint ${PLANTOPS_ENDPOINT} is responsive. Result: ${JSON.stringify(result)}`;
-        }
-         return { content: [{ type: "text", text: `Health check successful. ${resultText}` }] };
-    } catch (error: any) {
-        console.error(`[ERROR] Tool 'health_check' failed: ${error.message}`);
-         return { content: [{ type: "text", text: `Health check failed: ${error.message}` }], isError: false };
-    }
-  });
+        const argsSchema = field.args.map(arg => ({
+            name: arg.name,
+            description: arg.description,
+            type: JSON.stringify(arg.type),
+        }));
 
-  server.tool(
-  "describe_table",
-  "Shows the structure of a table including all columns with their types and descriptions",
-  {
-    tableName: z.string().describe("The exact name of the table to describe"),
-    schemaName: z.string().optional().default('public').describe("Optional. The database schema name, defaults to 'public'")
-  },
-  async ({ tableName, schemaName }) => {
-    console.error(`[INFO] Executing tool 'describe_table' for table: ${tableName} in schema: ${schemaName}`);
-    const schema = await getIntrospectionSchema();
-    const tableTypeQuery = gql`
-        query GetTableType($typeName: String!) { __type(name: $typeName) { name kind description fields { name description type { kind name ofType { kind name ofType { kind name ofType { kind name } } } } args { name description type { kind name ofType { kind name } } } } } }
-    `;
-    const tableTypeResult = await makeGqlRequest(tableTypeQuery, { typeName: tableName });
-    if (!tableTypeResult.__type) {
-        console.error(`[INFO] No direct match for table type: ${tableName}, trying case variations`);
-        const pascalCaseName = tableName.charAt(0).toUpperCase() + tableName.slice(1);
-        const alternativeResult = await makeGqlRequest(tableTypeQuery, { typeName: pascalCaseName });
-        if (!alternativeResult.__type) {
-            throw new Error(`Table '${tableName}' not found in schema. Check the table name and schema.`);
+        const payload = {
+            field: fieldName,
+            description: field.description || null,
+            returnType: JSON.stringify(field.type),
+            argsSchema,
+        };
+        return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+    });
+
+    server.tool(
+        "describeComplexField",
+        "Describes a top-level query or mutation field, its arguments, and its immediate sub-fields if it returns a complex object.",
+        {
+            fieldName: z.string().describe("Name of the top-level field to describe."),
+            operationType: z.enum(["query", "mutation"]).optional().default("query").describe("The type of operation: 'query' or 'mutation'. Defaults to 'query'."),
+        },
+        async ({ fieldName, operationType }) => {
+            console.error(`[INFO] Executing tool 'describeComplexField' for field: ${fieldName}`);
+            const schema = await getIntrospectionSchema();
+            let rootTypeName = '';
+            if (operationType === 'query') rootTypeName = schema.queryType?.name || '';
+            if (operationType === 'mutation') rootTypeName = schema.mutationType?.name || '';
+
+            const rootType = schema.types.find(t => t.name === rootTypeName) as IntrospectionObjectType | undefined;
+            const field = rootType?.fields.find(f => f.name === fieldName);
+
+            if (!field) {
+                throw new Error(`Field '${fieldName}' not found in '${operationType}'.`);
+            }
+
+            let currentType = field.type;
+            while ('ofType' in currentType && currentType.ofType) {
+                currentType = currentType.ofType;
+            }
+
+            let nestedFields: any[] | undefined = undefined;
+            if ('name' in currentType && currentType.name) {
+                const returnType = schema.types.find(t => t.name === currentType.name)
+                if (returnType?.kind === 'OBJECT') {
+                    nestedFields = (returnType as IntrospectionObjectType).fields.map(f => ({
+                        name: f.name,
+                        description: f.description,
+                        arguments: f.args.map(a => ({ name: a.name, description: a.description, type: JSON.stringify(a.type) })),
+                        returns: JSON.stringify(f.type)
+                    }));
+                }
+            }
+
+
+            const payload = {
+                name: field.name,
+                description: field.description,
+                arguments: field.args.map(a => ({ name: a.name, description: a.description, type: JSON.stringify(a.type) })),
+                returns: JSON.stringify(field.type),
+                nested_fields: nestedFields
+            };
+
+            return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
         }
-        tableTypeResult.__type = alternativeResult.__type;
-    }
-    const columnsInfo = tableTypeResult.__type.fields.map((field: any) => {
-        let typeInfo = field.type;
-        let typeString = '';
-        let isNonNull = false;
-        let isList = false;
-        while (typeInfo) {
-            if (typeInfo.kind === 'NON_NULL') {
-                isNonNull = true;
-                typeInfo = typeInfo.ofType;
-            } else if (typeInfo.kind === 'LIST') {
-                isList = true;
-                typeInfo = typeInfo.ofType;
-            } else {
-                typeString = typeInfo.name || 'unknown';
-                break;
+    );
+
+    server.tool(
+        "introspectType",
+        "Discover the available fields for a complex GraphQL object type. Use this when a type name is returned from another tool (like 'describeField') and you need to know its internal structure.",
+        {
+            typeName: z.string().describe("The name of the complex type to inspect (e.g., 'Users', 'UsersResult')."),
+        },
+        async ({ typeName }) => {
+            console.error(`[INFO] Executing tool 'introspectType' for type: ${typeName}`);
+            const schema = await getIntrospectionSchema();
+            const typeInfo = schema.types.find(t => t.name === typeName);
+            if (!typeInfo) {
+                throw new Error(`Type '${typeName}' not found in the schema.`);
+            }
+
+            if (typeInfo.kind !== 'OBJECT' && typeInfo.kind !== 'INTERFACE') {
+                return { content: [{ type: "text", text: JSON.stringify({ info: `Type '${typeName}' is a ${typeInfo.kind} and has no fields.` }, null, 2) }] };
+            }
+
+            const fieldsInfo = (typeInfo as IntrospectionObjectType | IntrospectionInterfaceType).fields.map(f => ({
+                name: f.name,
+                type: JSON.stringify(f.type),
+                description: f.description || null,
+            }));
+
+            return { content: [{ type: "text", text: JSON.stringify({ fields: fieldsInfo }, null, 2) }] };
+        }
+    );
+
+    server.tool(
+        "executeQuery",
+        "Execute a GraphQL query string (and optional variables) and return JSON.",
+        {
+            query: z.string().describe("GraphQL query string."),
+            variables: z.record(z.unknown()).optional().describe("Optional GraphQL variables object."),
+        },
+        async ({ query, variables }) => {
+            console.error(`[INFO] Executing tool 'executeQuery'`);
+            try {
+                const result = await makeGqlRequest(query, variables);
+                return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+            } catch (error: any) {
+                return { content: [{ type: "text", text: JSON.stringify({ error: error.message }, null, 2) }] };
             }
         }
-        let fullTypeString = '';
-        if (isList) {
-            fullTypeString = `[${typeString}]`;
-        } else {
-            fullTypeString = typeString;
-        }
-        if (isNonNull) {
-            fullTypeString += '!';
-        }
-        return { name: field.name, type: fullTypeString, description: field.description || null, args: field.args?.length ? field.args : null };
-    });
-    const result = { table: { name: tableName, schema: schemaName, description: tableTypeResult.__type.description || null, columns: columnsInfo.sort((a: any, b: any) => a.name.localeCompare(b.name)) } };
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-  });
+    );
 
 
   return server;
