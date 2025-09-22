@@ -20,15 +20,11 @@ const SCHEMA_RESOURCE_URI = "plantops:/schema";
 const SCHEMA_RESOURCE_NAME = "Plantops GraphQL Schema (via Introspection)";
 const SCHEMA_MIME_TYPE = "application/json";
 
-// --- MODIFICATION: We are removing the configSchema completely ---
-
 // The main server logic is now wrapped in this exported function.
-// --- MODIFICATION: The function no longer accepts any arguments ---
 export default function createServer() {
     // --- Hardcoded values for testing ---
-    // Replace these with your actual endpoint URL and secret.
+    // Replace this with your actual endpoint URL.
     const endpointUrl = "https://your-actual-graphql-url.com/v1/graphql";
-    const adminSecret = "your-admin-secret-if-you-have-one"; // Delete this line if you don't use a secret.
     // ---
 
     const PLANTOPS_ENDPOINT = endpointUrl;
@@ -44,10 +40,7 @@ export default function createServer() {
         },
     });
 
-    const headers: Record<string, string> = {};
-    if (adminSecret) {
-        headers['x-plantops-admin-secret'] = adminSecret; // Ensure your server accepts this header
-    }
+    const headers: Record<string, string> = {}; // Headers object is kept in case you need to add other headers later
     const gqlClient = new GraphQLClient(PLANTOPS_ENDPOINT, { headers });
 
     async function makeGqlRequest<
